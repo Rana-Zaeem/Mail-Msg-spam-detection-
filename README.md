@@ -25,7 +25,7 @@ This project is an advanced Email/SMS spam detection system with a responsive we
 - `sms-spam-detection.ipynb`: Jupyter notebook with EDA and model exploration
 - `requirements.txt`: Dependencies required for the project
 - `model.pkl`: Serialized machine learning model
-- `vectorizer.pkl`: Serialized TF-IDF vectorizer
+- `vectorizer.pkl`: Serialized TF-IDF vectorizers
 
 ## Installation & Usage
 
