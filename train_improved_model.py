@@ -261,13 +261,17 @@ print("Model training and selection complete. The best model has been saved.")
 
 # Generate confusion matrix for the best model
 try:
+    print("Generating confusion matrix visualization...")
     plt.figure(figsize=(8, 6))
     cm = confusion_matrix(y_test, y_pred)
     sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', cbar=False)
     plt.xlabel('Predicted')
     plt.ylabel('Actual')
     plt.title(f'Confusion Matrix - {best_model_name}')
+    
+    # Make sure the directory is writable
     plt.savefig('confusion_matrix.png')
     print("Confusion matrix saved as 'confusion_matrix.png'")
 except Exception as e:
     print(f"Error generating confusion matrix: {e}")
+    print("Continuing without visualization - this won't affect model functionality")
