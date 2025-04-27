@@ -13,7 +13,7 @@ import plotly.graph_objects as go
 # CONFIGURATION
 #------------------------------------------------------------
 
-# Set page configuration
+# Set page configuration - do this first before any other st calls
 st.set_page_config(
     page_title="Email/SMS Spam Classifier",
     page_icon="📧",
@@ -113,7 +113,81 @@ st.markdown("""
 # HELPER FUNCTIONS
 #------------------------------------------------------------
 
+# OPTIMIZATION: Load NLTK resources at startup with better error handling
+@st.cache_resource(ttl=3600)  # Cache for 1 hour
+def download_nltk_resources():
+    try:
+        nltk.data.find('tokenizers/punkt')
+        nltk.data.find('corpora/stopwords')
+        nltk.data.find('corpora/wordnet')
+        return True
+    except LookupError:
+        try:
+            nltk.download('punkt', quiet=True)
+            nltk.download('stopwords', quiet=True)
+            nltk.download('wordnet', quiet=True)
+            return True
+        except Exception as e:
+            st.warning(f"NLTK download issue: {str(e)}. Some features may be limited.")
+            return False
+
+# OPTIMIZATION: Preload models with better caching strategy
+@st.cache_resource(ttl=3600)  # Cache for 1 hour
+def load_models():
+    try:
+        model_path = 'model.pkl'
+        vectorizer_path = 'vectorizer.pkl'
+        
+        if not os.path.exists(model_path) or not os.path.exists(vectorizer_path):
+            st.error(f"Model files not found. Please check that {model_path} and {vectorizer_path} exist.")
+            return None, None
+        
+        # Use binary mode explicitly with error handling
+        try:
+            with open(vectorizer_path, 'rb') as f:
+                tfidf = pickle.load(f)
+            with open(model_path, 'rb') as f:
+                model = pickle.load(f)
+            return tfidf, model
+        except Exception as e:
+            st.error(f"Error loading model: {e}")
+            return None, None
+    except Exception as e:
+        st.error(f"Unexpected error in model loading: {e}")
+        return None, None
+
+# Initialize Porter Stemmer and Word Lemmatizer
+ps = PorterStemmer()
+lemmatizer = WordNetLemmatizer()
+
+# OPTIMIZATION: More efficient text preprocessing with caching
+@st.cache_data(ttl=3600)
+def transform_text(text):
+    """Optimized text preprocessing"""
+    if not text:
+        return ""
+        
+    # Convert to lowercase and tokenize
+    tokens = nltk.word_tokenize(text.lower())
+    
+    # One-pass filtering for better performance
+    filtered_tokens = []
+    try:
+        stop_words = set(stopwords.words('english'))
+        for token in tokens:
+            if token.isalnum() and token not in stop_words and token not in string.punctuation:
+                # Apply stemming and lemmatization
+                stemmed = ps.stem(token)
+                lemmatized = lemmatizer.lemmatize(stemmed)
+                filtered_tokens.append(lemmatized)
+    except Exception as e:
+        # Fallback if NLTK resources aren't available
+        filtered_tokens = [token.lower() for token in tokens if token.isalnum()]
+        
+    return " ".join(filtered_tokens)
+
 # Function to create an animated gauge chart
+@st.cache_data
 def create_gauge_chart(score, title):
     """
     Creates an animated gauge chart for visualizing spam probability
@@ -152,117 +226,10 @@ def create_gauge_chart(score, title):
     
     return fig
 
-#------------------------------------------------------------
-# TEXT PREPROCESSING
-#------------------------------------------------------------
-
-# Initialize Porter Stemmer and Word Lemmatizer
-ps = PorterStemmer()
-lemmatizer = WordNetLemmatizer()
-
-# Initialize NLTK resources - made more robust for cloud deployment
-@st.cache_resource
-def download_nltk_resources():
-    try:
-        nltk.data.find('tokenizers/punkt')
-        nltk.data.find('corpora/stopwords')
-        nltk.data.find('corpora/wordnet')
-    except LookupError:
-        with st.spinner('Downloading NLTK resources...'):
-            nltk.download('punkt')
-            nltk.download('stopwords')
-            nltk.download('wordnet')
-    
-    return True
-
-# Ensure NLTK resources are downloaded
-resources_ready = download_nltk_resources()
-
-# Text preprocessing function with lemmatization
-@st.cache_data
-def transform_text(text):
-    """
-    Preprocess text for spam classification using stemming and lemmatization
-    
-    Steps:
-    1. Convert to lowercase
-    2. Tokenize text
-    3. Remove non-alphanumeric characters
-    4. Remove stopwords and punctuation
-    5. Apply stemming and lemmatization
-    
-    Parameters:
-    text (str): Input text to preprocess
-    
-    Returns:
-    str: Preprocessed text
-    """
-    # Convert to lowercase and tokenize
-    text = text.lower()
-    text = nltk.word_tokenize(text)
-
-    # Keep only alphanumeric tokens
-    y = []
-    for i in text:
-        if i.isalnum():
-            y.append(i)
-
-    text = y[:]
-    y.clear()
-
-    # Remove stopwords and punctuation
-    for i in text:
-        if i not in stopwords.words('english') and i not in string.punctuation:
-            y.append(i)
-
-    text = y[:]
-    y.clear()
-
-    # Apply both stemming and lemmatization for better results
-    for i in text:
-        stemmed = ps.stem(i)
-        lemmatized = lemmatizer.lemmatize(stemmed)
-        y.append(lemmatized)
-
-    return " ".join(y)
-
-#------------------------------------------------------------
-# MODEL LOADING
-#------------------------------------------------------------
-
-# Load the model and vectorizer with error handling for cloud environment
-@st.cache_resource
-def load_models():
-    """
-    Load the trained model and vectorizer with robust error handling
-    
-    Returns:
-    tuple: (vectorizer, model) - The TF-IDF vectorizer and classification model
-    """
-    try:
-        with st.spinner('Loading models...'):
-            model_path = 'model.pkl'
-            vectorizer_path = 'vectorizer.pkl'
-            
-            # Check if files exist
-            if not os.path.exists(model_path) or not os.path.exists(vectorizer_path):
-                st.error(f"Model files not found. Please make sure {model_path} and {vectorizer_path} exist.")
-                return None, None
-            
-            # Load files with error handling
-            try:
-                tfidf = pickle.load(open(vectorizer_path, 'rb'))
-                model = pickle.load(open(model_path, 'rb'))
-                return tfidf, model
-            except Exception as e:
-                st.error(f"Error loading model: {e}")
-                return None, None
-    except Exception as e:
-        st.error(f"Unexpected error: {e}")
-        return None, None
-
-# Load models
-tfidf, model = load_models()
+# OPTIMIZATION: Preload resources and models early for faster startup
+with st.spinner("Loading resources..."):
+    resources_ready = download_nltk_resources()
+    tfidf, model = load_models()
 
 # Verify models loaded successfully
 if tfidf is None or model is None:
@@ -325,10 +292,9 @@ if predict_button:
         st.warning("Please enter a message to classify.")
     else:
         with st.spinner('Analyzing your message...'):
-            # Add a small delay to show animation
+            # OPTIMIZATION: Remove unnecessary sleep delays
             progress_bar = st.progress(0)
-            for percent_complete in range(0, 101, 20):
-                time.sleep(0.1)
+            for percent_complete in range(0, 101, 33):  # Faster progress updates
                 progress_bar.progress(percent_complete)
             
             # Preprocess
@@ -372,7 +338,7 @@ if predict_button:
             **Key Statistics:**
             - Character count: {len(input_sms)}
             - Word count: {len(input_sms.split())}
-            - Sentence count: {len(nltk.sent_tokenize(input_sms))}
+            - Sentence count: {len(nltk.sent_tokenize(input_sms)) if resources_ready else 'N/A'}
             """)
             
             st.warning("""
