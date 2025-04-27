@@ -11,10 +11,24 @@ import plotly.graph_objects as go
 
 # Force NLTK downloads to ensure they're available (important for cloud deployment)
 try:
-    # Directly download NLTK resources without checking if they exist
-    nltk.download('punkt', quiet=True)
-    nltk.download('stopwords', quiet=True)
-    nltk.download('wordnet', quiet=True)
+    # Download with specific paths to ensure they're found
+    nltk_data_path = os.path.join(os.path.expanduser('~'), 'nltk_data')
+    os.makedirs(nltk_data_path, exist_ok=True)
+    
+    # Download all required NLTK resources
+    nltk.download('punkt', download_dir=nltk_data_path)
+    nltk.download('stopwords', download_dir=nltk_data_path)
+    nltk.download('wordnet', download_dir=nltk_data_path)
+    
+    # Add this path to NLTK's search paths
+    nltk.data.path.append(nltk_data_path)
+    
+    # Verify the downloads
+    nltk.data.find('tokenizers/punkt')
+    nltk.data.find('corpora/stopwords')
+    nltk.data.find('corpora/wordnet')
+    
+    st.success("NLTK resources loaded successfully")
 except Exception as e:
     st.warning(f"NLTK download issue: {str(e)}. Some features may be limited.")
 
@@ -109,16 +123,28 @@ def transform_text(text):
     if not text:
         return ""
     
-    # Simplified implementation that's less likely to fail
+    # Simplified implementation with robust fallbacks
     try:
-        # Convert to lowercase and tokenize
-        tokens = nltk.word_tokenize(text.lower())
+        # First, try to use a simple split approach in case NLTK fails
+        words = text.lower().split()
+        
+        # Try using NLTK tokenizer if available
+        try:
+            words = nltk.word_tokenize(text.lower())
+        except Exception as e:
+            st.warning(f"Using basic tokenization instead of NLTK. Error: {str(e)}")
         
         # Filter tokens (simplified logic)
         filtered_tokens = []
-        for token in tokens:
+        for token in words:
+            # Only keep alphanumeric tokens that aren't stopwords
             if token.isalnum() and token not in stop_words:
-                filtered_tokens.append(ps.stem(token))
+                # Try to apply stemming, but have a fallback
+                try:
+                    stemmed = ps.stem(token)
+                    filtered_tokens.append(stemmed)
+                except:
+                    filtered_tokens.append(token)
         
         return " ".join(filtered_tokens)
     except Exception as e:
