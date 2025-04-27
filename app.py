@@ -1,48 +1,65 @@
-import streamlit as st
+import os
+import nltk
 import pickle
 import string
-import nltk
-import os
 import pandas as pd
 from nltk.corpus import stopwords
 from nltk.stem.porter import PorterStemmer
 from nltk.stem import WordNetLemmatizer
 import plotly.graph_objects as go
 
-# Force NLTK downloads to ensure they're available (important for cloud deployment)
+# IMPORTANT: Download NLTK resources BEFORE importing streamlit
+# This avoids the StreamlitAPIException that occurs when resources are downloaded
+# after st.set_page_config is called
 try:
-    # Download with specific paths to ensure they're found
+    # Create a custom NLTK data directory in a location that should be writable
     nltk_data_path = os.path.join(os.path.expanduser('~'), 'nltk_data')
     os.makedirs(nltk_data_path, exist_ok=True)
     
-    # Download all required NLTK resources
-    nltk.download('punkt', download_dir=nltk_data_path)
-    nltk.download('stopwords', download_dir=nltk_data_path)
-    nltk.download('wordnet', download_dir=nltk_data_path)
+    # Download all required resources
+    nltk.download('punkt', download_dir=nltk_data_path, quiet=True)
+    nltk.download('stopwords', download_dir=nltk_data_path, quiet=True)
+    nltk.download('wordnet', download_dir=nltk_data_path, quiet=True)
     
-    # Add this path to NLTK's search paths
-    nltk.data.path.append(nltk_data_path)
-    
-    # Verify the downloads
-    nltk.data.find('tokenizers/punkt')
-    nltk.data.find('corpora/stopwords')
-    nltk.data.find('corpora/wordnet')
-    
-    st.success("NLTK resources loaded successfully")
+    # Add the path to NLTK's search paths explicitly
+    nltk.data.path.insert(0, nltk_data_path)
 except Exception as e:
-    st.warning(f"NLTK download issue: {str(e)}. Some features may be limited.")
+    print(f"NLTK initialization error: {str(e)}")
+
+# Initialize language processing tools
+ps = PorterStemmer()
+lemmatizer = WordNetLemmatizer()
+
+# Pre-load stop words if possible
+try:
+    stop_words = set(stopwords.words('english'))
+except Exception as e:
+    print(f"Error loading stopwords: {str(e)}")
+    stop_words = set()
+
+# Now import streamlit after NLTK setup is complete
+import streamlit as st
 
 #------------------------------------------------------------
 # CONFIGURATION
 #------------------------------------------------------------
 
-# Set page configuration - do this first before any other st calls
+# Set page configuration
 st.set_page_config(
     page_title="Email/SMS Spam Classifier",
     page_icon="📧",
     layout="wide",
-    initial_sidebar_state="collapsed" # Collapse sidebar by default on mobile
+    initial_sidebar_state="collapsed"
 )
+
+# Show NLTK status
+try:
+    nltk.data.find('tokenizers/punkt')
+    nltk.data.find('corpora/stopwords')
+    nltk.data.find('corpora/wordnet')
+    st.sidebar.success("✅ NLTK resources loaded successfully")
+except Exception as e:
+    st.sidebar.warning(f"⚠️ NLTK resources not fully loaded: {str(e)}")
 
 # Apply simplified CSS for better performance while maintaining key styling
 st.markdown("""
@@ -75,33 +92,20 @@ st.markdown("""
 # HELPER FUNCTIONS - IMPROVED FOR STABILITY
 #------------------------------------------------------------
 
-# Initialize stemmer and lemmatizer - moved outside functions for single initialization
-ps = PorterStemmer()
-lemmatizer = WordNetLemmatizer()
-
-# Initialize stopwords once to avoid repeated loading
-try:
-    stop_words = set(stopwords.words('english'))
-except Exception:
-    # Fallback if stopwords aren't available
-    stop_words = set()
-    st.warning("Could not load stopwords. Using simplified text processing.")
-
-# Changed caching decorator to be compatible with different Streamlit versions
 @st.cache_data(ttl=3600)
 def load_models():
     """Load models with better error handling and feedback"""
     try:
-        model_path = os.path.join(os.path.dirname(__file__), 'model.pkl')
-        vectorizer_path = os.path.join(os.path.dirname(__file__), 'vectorizer.pkl')
+        model_path = 'model.pkl'
+        vectorizer_path = 'vectorizer.pkl'
         
-        # Check if files exist
+        # Check if files exist with full absolute paths for better debugging
         if not os.path.exists(model_path):
-            st.error(f"Model file not found at: {model_path}")
+            st.error(f"Model file not found at: {os.path.abspath(model_path)}")
             return None, None
             
         if not os.path.exists(vectorizer_path):
-            st.error(f"Vectorizer file not found at: {vectorizer_path}")
+            st.error(f"Vectorizer file not found at: {os.path.abspath(vectorizer_path)}")
             return None, None
         
         # Load the files with better error handling
@@ -123,23 +127,24 @@ def transform_text(text):
     if not text:
         return ""
     
-    # Simplified implementation with robust fallbacks
+    # Simple but effective implementation that doesn't rely heavily on NLTK
     try:
-        # First, try to use a simple split approach in case NLTK fails
+        # First, convert to lowercase and split by whitespace (safe fallback)
         words = text.lower().split()
         
-        # Try using NLTK tokenizer if available
+        # Only try NLTK tokenization if it's available
         try:
             words = nltk.word_tokenize(text.lower())
-        except Exception as e:
-            st.warning(f"Using basic tokenization instead of NLTK. Error: {str(e)}")
+        except:
+            # Continue with words from simple split
+            pass
         
-        # Filter tokens (simplified logic)
+        # Filter tokens using simple rules that don't depend on NLTK resources
         filtered_tokens = []
         for token in words:
-            # Only keep alphanumeric tokens that aren't stopwords
-            if token.isalnum() and token not in stop_words:
-                # Try to apply stemming, but have a fallback
+            # Only keep alphanumeric tokens that aren't stopwords and have length > 2
+            if token.isalnum() and token not in stop_words and len(token) > 2:
+                # Try stemming but fall back to original token if it fails
                 try:
                     stemmed = ps.stem(token)
                     filtered_tokens.append(stemmed)
@@ -148,8 +153,8 @@ def transform_text(text):
         
         return " ".join(filtered_tokens)
     except Exception as e:
-        # Ultra-fallback if anything fails
-        st.warning(f"Error in text processing: {str(e)}. Using basic processing.")
+        # Final fallback - just lowercase, split and filter short words
+        st.warning(f"Using basic text processing due to error: {str(e)}")
         words = text.lower().split()
         return " ".join([w for w in words if len(w) > 2])
 
